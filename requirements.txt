@@ -1,0 +1,17 @@
+# Dependencies for the Streamlit app (streamlit_app.py).
+# Streamlit Community Cloud reads this file from the repo root.
+#
+# Versions are pinned tightly because they constrain each other:
+#   tensorflow 2.15 is the last release using Keras 2, which is required to
+#   read this repo's 2021-era model exports, and it needs protobuf <5 and
+#   numpy <2. Streamlit >=1.45 requires protobuf >=5, so it is held at 1.40.
+# tensorflow-cpu (not tensorflow) keeps the image small enough for the
+# Community Cloud resource limit; there is no GPU there anyway.
+#
+# Requires Python 3.11 - set this under "Advanced settings" when deploying,
+# as tensorflow 2.15 has no wheels for 3.12+.
+streamlit==1.40.2
+tensorflow-cpu==2.15.1
+protobuf==4.25.3
+numpy<2
+pillow
