@@ -72,7 +72,12 @@ if uploaded is None:
     st.stop()
 
 image = Image.open(uploaded)
-st.image(image, caption=uploaded.name, use_column_width=True)
+# Streamlit renamed this argument in 1.41; support both so the pinned
+# local install and the Cloud's latest release each work.
+try:
+    st.image(image, caption=uploaded.name, use_container_width=True)
+except TypeError:
+    st.image(image, caption=uploaded.name, use_column_width=True)
 
 scores = predict(load_interpreter(), image)
 top = int(np.argmax(scores))
