@@ -1,212 +1,132 @@
 # Potato Disease Classification
 
-## Setup for Python:
+A convolutional neural network that reads a photo of a potato leaf and reports whether the plant has **early blight**, **late blight**, or is **healthy**.
 
-1. Install Python ([Setup instructions](https://wiki.python.org/moin/BeginnersGuide))
+Both diseases are treatable, but they need different treatment and both spread fast. Telling them apart normally takes an agronomist. This project puts that call in the hands of anyone with a phone camera.
 
-2. Install Python packages
+The repository carries the whole path from raw data to something a farmer could open: the training notebooks, the trained model in four formats, a REST API, a web UI, a mobile app, and several deployment targets.
 
-```
-pip3 install -r training/requirements.txt
-pip3 install -r api/requirements.txt
-```
+## Demo
 
-3. Install Tensorflow Serving ([Setup instructions](https://www.tensorflow.org/tfx/serving/setup))
+**[Try it live](https://potato-disease-classification-hzy52svuf8gsxqzcqtpgta.streamlit.app/)** — no install needed.
 
-## Setup for ReactJS
+Upload a leaf photo and the app returns the predicted class with a confidence score for all three categories.
 
-1. Install Nodejs ([Setup instructions](https://nodejs.org/en/download/package-manager/))
-2. Install NPM ([Setup instructions](https://www.npmjs.com/get-npm))
-3. Install dependencies
+## The model
+
+A small CNN trained from scratch — no transfer learning.
+
+| | |
+|---|---|
+| Architecture | 6 × (Conv2D → MaxPooling2D) → Flatten → Dense → Dense |
+| Parameters | 183,747 |
+| Input | 256 × 256 RGB |
+| Classes | Early Blight, Late Blight, Healthy |
+| Training | 50 epochs, batch size 32 |
+| Test accuracy | 100% |
+| Dataset | [PlantVillage](https://www.kaggle.com/arjuntejaswi/plant-village) (potato subset), ~2,150 images |
+
+Resizing and rescaling are layers *inside* the model, so it takes raw 0–255 pixel values rather than requiring callers to normalize first.
+
+### On that 100% accuracy
+
+It is real, and it is also less impressive than it sounds. PlantVillage images are single leaves shot against a plain background under even lighting. Field photos have soil, other leaves, shadows and glare, and the model has never seen any of that.
+
+You can watch it fail, in both directions and without hesitation:
+
+- `test_images_from_internet/late_blight_1.jpg` is a textbook late blight lesion. The model says Early Blight, 73.9%.
+- A clear early blight leaf — the concentric target-shaped lesions the disease is named for — comes back as Late Blight at 100.0%.
+
+That second one is the important one. The model is not uncertain and wrong; it is confident and wrong, which is worse, because the confidence score gives you no warning. Read it as a rough signal, never as a diagnosis.
+
+Fixing this means retraining on field photography, not tuning the existing model. The ceiling here is the dataset, not the architecture.
+
+## What's in the repository
+
+| Path | What it is |
+|---|---|
+| `training/` | Jupyter notebooks — data loading, augmentation, training, and TFLite conversion (including quantization-aware training) |
+| `saved_models/1,2,3` | TensorFlow SavedModel exports, one per training run |
+| `potatoes.h5` | Keras H5 export, used by the Google Cloud Function |
+| `potato_model.tflite` | TFLite build used by the Streamlit app (724 KB) |
+| `tf-lite-models/` | Earlier TFLite exports for the mobile app |
+| `streamlit_app.py` | Single-file web app — upload, classify, show confidence |
+| `api/main.py` | FastAPI server that loads the model in-process |
+| `api/main-tf-serving.py` | Same API, but delegating inference to TensorFlow Serving |
+| `frontend/` | React web UI with drag-and-drop upload |
+| `mobile-app/` | React Native app for Android and iOS |
+| `gcp/` | Google Cloud Function handlers for serverless deployment |
+| `test_images_from_internet/` | Two sample leaf photos for quick testing |
+
+## Running it
+
+### Streamlit app — quickest
 
 ```bash
+pip install -r requirements.txt
+streamlit run streamlit_app.py
+```
+
+Opens at `http://localhost:8501`. No TensorFlow required: it runs the TFLite model through LiteRT, which installs in seconds instead of minutes.
+
+### FastAPI + React
+
+Two terminals.
+
+```bash
+# terminal 1 — API on :8000
+cd api
+pip install fastapi uvicorn python-multipart pillow "tensorflow==2.15.1" "numpy<2"
+python main.py
+```
+
+```bash
+# terminal 2 — web UI on :3000
 cd frontend
-npm install --from-lock-json
-npm audit fix
+npm install --legacy-peer-deps
+cp .env.example .env          # set REACT_APP_API_URL=http://localhost:8000/predict
+npm start
 ```
 
-4. Copy `.env.example` as `.env`.
+On Windows, `start-api.bat` and `start-frontend.bat` do both.
 
-5. Change API url in `.env`.
-
-## Setup for React-Native app
-
-1. Go to the [React Native environment setup](https://reactnative.dev/docs/environment-setup), then select `React Native CLI Quickstart` tab.  
-
-2. Install dependencies
+Test the API directly:
 
 ```bash
-cd mobile-app
-yarn install
+curl -X POST -F "file=@test_images_from_internet/early_blight_1.jpg" \
+  http://localhost:8000/predict
+# {"class":"Early Blight","confidence":1.0}
 ```
 
-  - 2.1 Only for mac users
-```bash
-cd ios && pod install && cd ../
-```
+### Version requirements
 
-3. Copy `.env.example` as `.env`.
+These are tighter than they look, and getting them wrong is the most common way to waste an hour here.
 
-4. Change API url in `.env`.
+- **TensorFlow 2.15** is the newest release that can load `saved_models/` and `potatoes.h5`. They were exported under Keras 2 in 2021; Keras 3 refuses them.
+- **Python ≤ 3.11** follows from that — TensorFlow 2.15 publishes no wheels for 3.12+.
+- **`saved_models/1` and `2` will not load at all.** Their in-model `RandomFlip` layers were exported without a serialized call function. Use `saved_models/3`.
+- **The Streamlit app escapes all of this** by running TFLite instead, which is why it has no TensorFlow dependency and no version pins.
 
-## Training the Model
-
-1. Download the data from [kaggle](https://www.kaggle.com/arjuntejaswi/plant-village).
-2. Only keep folders related to Potatoes.
-3. Run Jupyter Notebook in Browser.
+## Training
 
 ```bash
+pip install -r training/requirements.txt
 jupyter notebook
 ```
 
-4. Open `training/potato-disease-training.ipynb` in Jupyter Notebook.
-5. In cell #2, update the path to dataset.
-6. Run all the Cells one by one.
-7. Copy the model generated and save it with the version number in the `models` folder.
+Open `training/potato-disease-classification-model.ipynb`, point cell 2 at your PlantVillage download, and run through. Save the result into `saved_models/` under the next version number.
 
-## Running the API
+`training/tf-lite-converter.ipynb` converts a trained model to TFLite; the quantization-aware variant trades a little accuracy for a smaller file.
 
-### Using FastAPI
+## Deployment
 
-1. Get inside `api` folder
+| Target | Notes |
+|---|---|
+| Streamlit Community Cloud | Point it at this repo, main file `streamlit_app.py`. Nothing else to configure. |
+| Google Cloud Functions | `cd gcp && gcloud functions deploy predict_lite --runtime python38 --trigger-http --memory 512`. Upload the model to a GCS bucket first and set `BUCKET_NAME` in `gcp/main.py`. |
+| TensorFlow Serving | `docker run -p 8501:8501 -v $(pwd):/models tensorflow/serving --model_config_file=/models/models.config`, then run `api/main-tf-serving.py`. Copy `models.config.example` first. |
+| Mobile | `cd mobile-app && npm install && npm run android` (or `ios`). Bundles the TFLite model for on-device inference. |
 
-```bash
-cd api
-```
+## Dataset
 
-2. Run the FastAPI Server using uvicorn
-
-```bash
-uvicorn main:app --reload --host 0.0.0.0
-```
-
-3. Your API is now running at `0.0.0.0:8000`
-
-### Using FastAPI & TF Serve
-
-1. Get inside `api` folder
-
-```bash
-cd api
-```
-
-2. Copy the `models.config.example` as `models.config` and update the paths in file.
-3. Run the TF Serve (Update config file path below)
-
-```bash
-docker run -t --rm -p 8501:8501 -v C:/Code/potato-disease-classification:/potato-disease-classification tensorflow/serving --rest_api_port=8501 --model_config_file=/potato-disease-classification/models.config
-```
-
-4. Run the FastAPI Server using uvicorn
-   For this you can directly run it from your main.py or main-tf-serving.py using pycharm run option (as shown in the video tutorial)
-   OR you can run it from command prompt as shown below,
-
-```bash
-uvicorn main-tf-serving:app --reload --host 0.0.0.0
-```
-
-5. Your API is now running at `0.0.0.0:8000`
-
-## Running the Frontend
-
-1. Get inside `api` folder
-
-```bash
-cd frontend
-```
-
-2. Copy the `.env.example` as `.env` and update `REACT_APP_API_URL` to API URL if needed.
-3. Run the frontend
-
-```bash
-npm run start
-```
-
-## Running the app
-
-1. Get inside `mobile-app` folder
-
-```bash
-cd mobile-app
-```
-
-2. Copy the `.env.example` as `.env` and update `URL` to API URL if needed.
-
-3. Run the app (android/iOS)
-
-```bash
-npm run android
-```
-
-or
-
-```bash
-npm run ios
-```
-
-4. Creating public ([signed APK](https://reactnative.dev/docs/signed-apk-android))
-
-
-## Creating the TF Lite Model
-
-1. Run Jupyter Notebook in Browser.
-
-```bash
-jupyter notebook
-```
-
-2. Open `training/tf-lite-converter.ipynb` in Jupyter Notebook.
-3. In cell #2, update the path to dataset.
-4. Run all the Cells one by one.
-5. Model would be saved in `tf-lite-models` folder.
-
-## Deploying the TF Lite on GCP
-
-1. Create a [GCP account](https://console.cloud.google.com/freetrial/signup/tos?_ga=2.25841725.1677013893.1627213171-706917375.1627193643&_gac=1.124122488.1627227734.Cj0KCQjwl_SHBhCQARIsAFIFRVVUZFV7wUg-DVxSlsnlIwSGWxib-owC-s9k6rjWVaF4y7kp1aUv5eQaAj2kEALw_wcB).
-2. Create a [Project on GCP](https://cloud.google.com/appengine/docs/standard/nodejs/building-app/creating-project) (Keep note of the project id).
-3. Create a [GCP bucket](https://console.cloud.google.com/storage/browser/).
-4. Upload the potatoes.h5 model in the bucket in the path `models/potatos.h5`.
-5. Install Google Cloud SDK ([Setup instructions](https://cloud.google.com/sdk/docs/quickstarts)).
-6. Authenticate with Google Cloud SDK.
-
-```bash
-gcloud auth login
-```
-
-7. Run the deployment script.
-
-```bash
-cd gcp
-gcloud functions deploy predict_lite --runtime python38 --trigger-http --memory 512 --project project_id
-```
-
-8. Your model is now deployed.
-9. Use Postman to test the GCF using the [Trigger URL](https://cloud.google.com/functions/docs/calling/http).
-
-Inspiration: https://cloud.google.com/blog/products/ai-machine-learning/how-to-serve-deep-learning-models-using-tensorflow-2-0-with-cloud-functions
-
-## Deploying the TF Model (.h5) on GCP
-
-1. Create a [GCP account](https://console.cloud.google.com/freetrial/signup/tos?_ga=2.25841725.1677013893.1627213171-706917375.1627193643&_gac=1.124122488.1627227734.Cj0KCQjwl_SHBhCQARIsAFIFRVVUZFV7wUg-DVxSlsnlIwSGWxib-owC-s9k6rjWVaF4y7kp1aUv5eQaAj2kEALw_wcB).
-2. Create a [Project on GCP](https://cloud.google.com/appengine/docs/standard/nodejs/building-app/creating-project) (Keep note of the project id).
-3. Create a [GCP bucket](https://console.cloud.google.com/storage/browser/).
-4. Upload the tf .h5 model generate in the bucket in the path `models/potato-model.h5`.
-5. Install Google Cloud SDK ([Setup instructions](https://cloud.google.com/sdk/docs/quickstarts)).
-6. Authenticate with Google Cloud SDK.
-
-```bash
-gcloud auth login
-```
-
-7. Run the deployment script.
-
-```bash
-cd gcp
-gcloud functions deploy predict --runtime python38 --trigger-http --memory 512 --project project_id
-```
-
-8. Your model is now deployed.
-9. Use Postman to test the GCF using the [Trigger URL](https://cloud.google.com/functions/docs/calling/http).
-
-Inspiration: https://cloud.google.com/blog/products/ai-machine-learning/how-to-serve-deep-learning-models-using-tensorflow-2-0-with-cloud-functions
-
+[PlantVillage](https://www.kaggle.com/arjuntejaswi/plant-village) on Kaggle. Download it, keep only the three potato folders, and point the training notebook at that directory.
