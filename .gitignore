@@ -1,0 +1,10 @@
+.vscode
+.pycharm
+__pycache__
+.idea
+.ipynb_checkpoints
+models.config
+PlantVillage/
+# local python virtualenv (1.5GB, recreate with: python -m venv .venv)
+.venv/
+venv/
